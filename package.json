@@ -3,15 +3,7 @@
   "version": "1.4.1",
   "description": "E2E testing for Autoserve1",
   "scripts": {
-    "staging": "yarn cypress run --config-file ./config/staging.json --spec 'cypress/integration/Test/Basicworkflow.spec.js,cypress/integration/Test/devTest.spec.js,cypress/integration/Test/payments.spec.js,cypress/integration/Test/myCar.spec.js,' --browser chrome --headless --reporter cypress-multi-reporters configFile=reporterOpts.json overwrite=false,html=true,json=true",
-    "app-release": "yarn cypress run --config-file ./config/release.json --spec 'cypress/integration/Test/Basicworkflow.spec.js,cypress/integration/Test/payments.spec.js' --browser chrome --headless",
-    "dev-test": "yarn cypress run --config-file ./config/staging.json --spec 'cypress/integration/Test/devTest.spec.js' --browser chrome",
-    "report": "yarn cypress run  --config-file ./config/staging.json --spec 'cypress/integration/Test/Basicworkflow.spec.js' --browser chrome --reporter cypress-multi-reporters configFile=reporterOpts.json overwrite=false,html=true,json=true",
-    "slack": "yarn cypress run --spec 'cypress/integration/Test/scripts/slacktext.js' --reporter-options configFile=reporter-config.json overwrite=false,html=false,json=true",
-    "htmlreport": "yarn cypress run --config-file ./config/staging.json --spec 'cypress/integration/Test/Basicworkflow.spec.js' --headless --reporter-options configFile=reporter-config.json overwrite=false,html=true,json=true",
-    "test": "yarn run report && yarn run slack",
-    "smoketest": "yarn cypress run  --spec 'cypress/integration/Test/devTest.spec.js,cypress/integration/Test/payments.spec.js' --browser chrome --headless --reporter cypress-multi-reporters configFile=reporterOpts.json overwrite=false,html=false,json=true"
-  },
+},
   "main": "index.js",
   "repository": "https://github.com/steveautoserve1/cypress-yarn",
   "author": "AS1QA",
