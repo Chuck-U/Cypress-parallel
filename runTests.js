@@ -1,178 +1,326 @@
 var Cypress = require('cypress');
-const rp = require('request-promise');
+const axios = require('axios');
 const minimist = require('minimist');
-require('dotenv').config([]);
+const fs = require('fs-extra');
+const axiosRetry = require('axios-retry');
+var _ = require('lodash');
+var args = minimist(process.argv.slice(2),
+    {
 
+        alias: {
+            e: 'environment',
+            s: 'spec'
+        }
+    });
 
-let args = minimist(process.argv.slice(2), {
-    alias: {
-        c: 'config',
-        s: 'spec',
-        b: 'browser',
-        d: 'second',
-        //     t: 'third'
+axiosRetry(axios, {
+    retryDelay: (retryCount) => {
+        return retryCount * 1000;
     }
 });
-console.log(args)
-let param = args.d;
-let config = args.c;
-let spec = args.s;
-let browser = args.b;
+
+
+
 /**
  *
- * @param {string} config config file to use (app, staging)
+ * @param {string} environment environment file to use (app, staging)
  * @param {string} spec spec name (devTest, payments, Basicworkflow, myCar, Workflow1, adminpartner)
  * @param {string} browser chrome, electron or firefox
  */
-async function runTests(config, spec, browser) {
-    var stats;
-    let channel;
-    console.log(`Now running ${spec} on ${config} environment`);
-
-    if (!config || !spec) {
+function runTests(environment, spec) {
+    console.log(`Now running ${spec} on ${environment} environment`);
+    if (!environment || !spec) {
         console.log('missing params');
-        process.exit(1);
-
+        console.log('\nOops\nOops\nOops\nOops\nOops\nOops\nOops\nOops\nOops\nOops')
     }
     var dTime = new Date();
 
-    if (!browser) {
 
-        browser = 'electron';
-    }
-
-    try {
-        await Cypress.run(
-            {
-                "configFile": `./config/${config}.json`,
-                "spec": `cypress/integration/${spec}.spec.js`,
-                "browser": browser,
-                "headless": true,
-                "reporter": 'list',
-                "reporterOptions": {
-                    "toConsole": true
-                }
-            }).then(async (results) => {
-                stats = results.runs[0].stats;
-                console.log(stats);
-
-
-                let passRate = `${stats.passes / (stats.tests - stats.pending) * 100}`;
-
-                console.log(passRate, "% passed");
-
-                // Sets a threshold for report options
-                if (passRate <= 85) {
-                    channel = process.env.failChannel
-                    var reportResult = {
-                        "spec": `"${spec} testGroup"`,
-
-                        "*environment*": `"${config} server"`,
-
-                        "Failures": `${results.totalFailed}`,
-                        "Tests Run": `${stats.tests - stats.pending}`,
-
-                        "Test passing %": `${passRate}`,
-
-                        "Duration (seconds)": stats.wallClockDuration / 1000
-                    };
-                    if (results.totalFailed >= 5) {
-                        let warningResult = { "_Warning_": `:redsiren: *${results.totalFailed}/${results.totalTests}* failed\n ` };
-                        Object.assign(reportResult, warningResult);
-
-                    }
-                    var reportSend = "";
-                    for (const [key, value] of Object.entries(reportResult)) {
-
-                        reportSend = reportSend.concat(`${key}: ${value}`, `\n`);
-                    }
-
-                    notifySlack(chanel, reportSend);
-                }
-                else {
-
-                    channel = process.env.passChannel
-
-
-                    var reportResult = {
-                        "Result": `"${results.startedTestsAt}: ${spec} testGroup ran on ${config} server with no issues"`,
-                        "Duration (seconds)": stats.wallClockDuration / 1000
-                    };
-                    for (const [key, value] of Object.entries(reportResult)) {
-
-                        reportSend = reportSend.concat(`${key}: ${value}`, `\n`);
-                    }
-                    notifySlack(pchannel, reportResult);
-                    console.log(`${spec} on ${config} met threshold`);
-                }
-            });
-    }
-    catch (error) {
-
-        console.log('runTests failed with the following error:%d', error);
-        throw new Error('Error occured with RunTests', error);
-
-    }
-
-};
-runTests(config, spec, browser)
-exports.runTests = runTests;
-/**
- *
- * @param {object} stats
- * @param {string} spec
- * @param {string} config
- * @param {number} ratio
- */
-
-
-
-
-
-/**
- *
- * @param {*} channel Slack channel to send to
- * @param {*} result result Object
- */
-async function notifySlack(channel, result) {
-
-    var options = {
-        method: 'POST',
-        uri: 'https://slack.com/api/chat.postMessage',
-        headers: {
-            'Authorization': `Bearer ${process.env.slackToken}`,
-            'Content-Type': 'application/json'
-
-        },
-
-        body: JSON.stringify({
-            "channel": `${channel}`,
-            "text": `${result}`,
-            "emoji": true
-        }),
+    const args = {
+        "configFile": environment === 'local' ? './local.json' : `./config/${environment}.json`,
+        "spec": `cypress/integration/${spec}`,
+        "browser": 'chrome',
+        "headless": true,
+        "reporter": 'spec',
+        "chromeWebSecurity": false,
+        "reporterOptions": {
+            "toConsole": true
+        }
     };
 
+    return new Promise((accept, reject) => {
 
-
-    var response = await rp(options)
-        .then((res) => {
-            console.log(res.data);
-
-            if (res.statusCode == 200 || 201) {
-                console.log('all sent');
-                return null;
-            }
-            else if (response && response.statusCode != 400) {
-                console.log('couldn\'t send');
-                return false;
+        Cypress.run(args).then(results => {
+            if (results.stats === 'failed') {
+                console.error(results.message)
+                notifyError(results.error);
+                return process.exit(1)
 
             }
+            try {
+                var runs = results.runs[0];
+
+                //[1].runs[0].reporterStats
+
+                var storeData = fs.readJSONSync(`./stores/${spec.split('.')[0]}.json`)
+                    // var runStat = {
+                    //     get titles(stat) {
+                    //         yield Object.keys(stat)
+                    //     }
+                    // }
+
+                    let testFails = results.runs[0].tests.filter(test => test.state === "failed").map(test => {
+                         return { "name": test.title[2], "state": test.state, "error": test.displayError.toString().split(')\n')[0] } 
+                })
+
+                // let testFails = results.runs[0].tests.map((val) => {
+                //     let tests = [];
+                //     tests += `:x: ${val.title[2]}`;
+                //     return tests
+                // }).filter(runs => runs.slice(0, 6) == "failed");
+                var runStat = {};
+                Object.assign(runStat, { "stats": results.runs[0].reporterStats }, { "failed": testFails, "test": results.runs[0].spec.name.split('.')[0] });
+
+                runs.storeId = storeData.storeId
+
+
+
+
+
+                if (results.runs[0].stats.failures > 0) {
+                    //           runs = Object.assign(runs, { "failedTests": testFails })
+                    //     console.log('failures occured', runs)
+                    runs.failedTests = [testFails];
+                    runs.storeId = storeData.storeId
+
+                    accept(runs)
+                }
+                else {
+                    console.log(runs)
+                    accept(runs)
+                }
+                //     fs.appendFileSync(`./stores/${spec.split('.')[0]}.json`, `,${JSON.stringify(runs)}`)
+
+
+            } catch (e) {
+                console.log('error', e.message)
+                reject(runs)
+                throw e;
+            }
+
         }).catch((err) => {
-            console.log("request failed to Slack", err);
-            throw new Error('notifySlack', err);
-        });
 
+            console.error(err.message)
+            process.exit(1)
+        })
+
+
+    })
 }
 
 
+
+exports.runTests = runTests;
+/**
+ *
+ * @param {object} res
+ * @returns
+ */
+const isPending = (res, slackNote) => {
+    console.log('isPending() fired initially')
+    try {
+        if (res.reporterStats.failures >= 1 || res.reporterStats.skipped > 1) {
+            console.log('isPending hit a condition to trigger')
+            let pending = res.tests
+                .filter(val => val.state === "failed").map((entry) => {
+
+                    return `Test: ${entry.title[entry.title.length - 1]} - *(${entry.state})* \n
+                    error: ${entry.displayError.toString()} \r \n`
+
+                }).join().toString();
+
+
+            //.map((entry) => { let message = ''; return message += `title: ${entry.title[entry.title.length - 1]}, state: ${entry.state}\n ` })
+            //res.tests.filter((value => value["state"] == "failed")).pop()
+            //res.tests.filter((val => val["state"] == "failed")).map((test) => test.title).join('\n')
+
+
+            return pending
+
+        }
+        else {
+            return '';
+
+        }
+    } catch (err) {
+        console.log('isPending failed with the following error', err.message)
+        return '';
+    }
+
+
+}
+
+exports.isPending = isPending;
+
+function processResults(results) {
+    try {
+
+        let spec = results.spec.name.toString()
+        stats = results.stats;
+
+        return {
+            "TestGroup": ` ${spec.split('.')[0]} spec\n`,
+            "Environment": ` ${args.e} server \n`,
+            "stats": [JSON.stringify(results.stats, null, "\n")],
+            "Notes": `${isPending(results).toString()} \n`,
+            "_id": ` ${results.storeId}\n`
+        }
+
+
+    }
+
+    catch (e) {
+        console.error('Process results error', e)
+        console.error('Process results error', e.message);
+
+    }
+}
+
+exports.processResults = processResults;
+
+/**
+ *
+ * @param {object} reportResult
+ *
+ * returns a stringified result
+ *
+ */
+function joinResults(reportResult) {
+
+
+    var fullResults;
+    for (const [key, value] of Object.entries(reportResult)) {
+
+        fullResults = fullResults.concat(`${key}: ${value}`, `\n`);
+    }
+
+
+    if (fullResults && (typeof fullResults) === 'string') {
+        return fullResults
+    }
+    else {
+        return null
+    }
+
+
+}
+exports.joinResults = joinResults;
+
+
+/**
+ *
+ * @param {object} result test result for slack message
+ * @param {String} reportTarget .env loaded target for slack to report to.
+ */
+
+function notifySlack(result, reportTarget) {
+    // console.log('preTransformed', result.length)
+    console.log(reportTarget)
+    // let report = JSON.stringify(result[0]);
+
+    let report = "";
+    for (var i = 0; i < result.length; i++) {
+        for (const [key, value] of Object.entries(result[i])) {
+            report = report.concat([key.toString() + ":" + value.toString() + "\n"])
+
+        }
+    }
+    /*    class results{
+           constructor(val,i,report) {
+               let headers = ["result1", "result2", "result3"].join(',')
+
+           }
+
+           add(val, i) {
+               for (const l = 0; l < i; l++) {
+                   line += val
+               }
+
+
+           }
+   } */
+
+    var options = {
+        method: 'POST',
+        url: reportTarget,
+        headers: {
+            'content-type': 'application/json'
+        },
+
+        data: {
+            "text": report,
+            "emoji": true
+
+        },
+
+    };
+
+    axios(options).then((parsedBody) => {
+        console.log(parsedBody.data)
+        process.exit(0)
+    }).catch(function (err) {
+        console.error(err)
+        process.exit(1)
+    })
+
+
+}
 exports.notifySlack = notifySlack;
+function notifyError(result) {
+    // console.log('preTransformed', result.length)
+    // let report = JSON.stringify(result[0]);
+
+
+    /*    class results{
+           constructor(val,i,report) {
+               let headers = ["result1", "result2", "result3"].join(',')
+
+           }
+
+           add(val, i) {
+               for (const l = 0; l < i; l++) {
+                   line += val
+               }
+
+
+           }
+   } */
+
+    var options = {
+        method: 'POST',
+        url: process.env.slackProd,
+        headers: {
+            'content-type': 'application/json'
+        },
+
+        data: {
+            "text": result.toString(),
+            "emoji": true
+
+        },
+
+    };
+
+    axios(options).then((parsedBody) => {
+        console.log(parsedBody.data)
+        return;
+    }).catch(function (err) {
+        console.error(err)
+        return;
+    })
+
+
+}
+
+exports.notifyError = notifyError;
+
